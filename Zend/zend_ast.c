@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | Zend Engine                                                          |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1998-2014 Zend Technologies Ltd. (http://www.zend.com) |
+   | Copyright (c) 1998-2015 Zend Technologies Ltd. (http://www.zend.com) |
    +----------------------------------------------------------------------+
    | This source file is subject to version 2.00 of the Zend license,     |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -251,10 +251,19 @@ ZEND_API void zend_ast_evaluate(zval *result, zend_ast *ast, zend_class_entry *s
 			zval_dtor(&op2);
 			break;
 		case ZEND_CONST:
-			*result = *ast->u.val;
-			zval_copy_ctor(result);
-			if (IS_CONSTANT_TYPE(Z_TYPE_P(result))) {
-				zval_update_constant_ex(&result, 1, scope TSRMLS_CC);
+			/* class constants may be updated in-place */
+			if (scope) {
+				if (IS_CONSTANT_TYPE(Z_TYPE_P(ast->u.val))) {
+					zval_update_constant_ex(&ast->u.val, 1, scope TSRMLS_CC);
+				}
+				*result = *ast->u.val;
+				zval_copy_ctor(result);
+			} else {
+				*result = *ast->u.val;
+				zval_copy_ctor(result);
+				if (IS_CONSTANT_TYPE(Z_TYPE_P(result))) {
+					zval_update_constant_ex(&result, 1, scope TSRMLS_CC);
+				}
 			}
 			break;
 		case ZEND_BOOL_AND:

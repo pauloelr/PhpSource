@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | PHP Version 5                                                        |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1997-2014 The PHP Group                                |
+   | Copyright (c) 1997-2015 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -421,8 +421,6 @@ static PHP_INI_MH(OnUpdateInternalEncoding)
 {
 	if (new_value) {
 		OnUpdateString(entry, new_value, new_value_length, mh_arg1, mh_arg2, mh_arg3, stage TSRMLS_CC);
-	} else {
-		OnUpdateString(entry, SG(default_charset), strlen(SG(default_charset))+1, mh_arg1, mh_arg2, mh_arg3, stage TSRMLS_CC);
 	}
 	return SUCCESS;
 }
@@ -434,8 +432,6 @@ static PHP_INI_MH(OnUpdateInputEncoding)
 {
 	if (new_value) {
 		OnUpdateString(entry, new_value, new_value_length, mh_arg1, mh_arg2, mh_arg3, stage TSRMLS_CC);
-	} else {
-		OnUpdateString(entry, SG(default_charset), strlen(SG(default_charset))+1, mh_arg1, mh_arg2, mh_arg3, stage TSRMLS_CC);
 	}
 	return SUCCESS;
 }
@@ -447,8 +443,6 @@ static PHP_INI_MH(OnUpdateOutputEncoding)
 {
 	if (new_value) {
 		OnUpdateString(entry, new_value, new_value_length, mh_arg1, mh_arg2, mh_arg3, stage TSRMLS_CC);
-	} else {
-		OnUpdateString(entry, SG(default_charset), strlen(SG(default_charset))+1, mh_arg1, mh_arg2, mh_arg3, stage TSRMLS_CC);
 	}
 	return SUCCESS;
 }
@@ -924,7 +918,7 @@ PHPAPI void php_verror(const char *docref, const char *params, int type, const c
 	} else {
 		spprintf(&message, 0, "%s: %s", origin, buffer);
 	}
-	efree(origin);
+	str_efree(origin);
 	if (docref_buf) {
 		efree(docref_buf);
 	}
@@ -941,7 +935,7 @@ PHPAPI void php_verror(const char *docref, const char *params, int type, const c
 			zend_hash_update(EG(active_symbol_table), "php_errormsg", sizeof("php_errormsg"), (void **) &tmp, sizeof(zval *), NULL);
 		}
 	}
-	efree(buffer);
+	str_efree(buffer);
 
 	php_error(type, "%s", message);
 	efree(message);
@@ -1142,8 +1136,8 @@ static void php_error_cb(int type, const char *error_filename, const uint error_
 		if (!module_initialized || PG(log_errors)) {
 			char *log_buffer;
 #ifdef PHP_WIN32
-			if ((type == E_CORE_ERROR || type == E_CORE_WARNING) && PG(display_startup_errors)) {
-				MessageBox(NULL, buffer, error_type_str, MB_OK|ZEND_SERVICE_MB_STYLE);
+			if (type == E_CORE_ERROR || type == E_CORE_WARNING) {
+				syslog(LOG_ALERT, "PHP %s: %s (%s)", error_type_str, buffer, GetCommandLine());
 			}
 #endif
 			spprintf(&log_buffer, 0, "PHP %s:  %s in %s on line %d", error_type_str, buffer, error_filename, error_lineno);
@@ -1163,7 +1157,7 @@ static void php_error_cb(int type, const char *error_filename, const uint error_
 						size_t len;
 						char *buf = php_escape_html_entities(buffer, buffer_len, &len, 0, ENT_COMPAT, NULL TSRMLS_CC);
 						php_printf("%s<br />\n<b>%s</b>:  %s in <b>%s</b> on line <b>%d</b><br />\n%s", STR_PRINT(prepend_string), error_type_str, buf, error_filename, error_lineno, STR_PRINT(append_string));
-						efree(buf);
+						str_efree(buf);
 					} else {
 						php_printf("%s<br />\n<b>%s</b>:  %s in <b>%s</b> on line <b>%d</b><br />\n%s", STR_PRINT(prepend_string), error_type_str, buffer, error_filename, error_lineno, STR_PRINT(append_string));
 					}
@@ -1319,6 +1313,10 @@ PHPAPI char *php_get_current_user(TSRMLS_D)
 		}
 		pwbuf = emalloc(pwbuflen);
 		if (getpwuid_r(pstat->st_uid, &_pw, pwbuf, pwbuflen, &retpwptr) != 0) {
+			efree(pwbuf);
+			return "";
+		}
+		if (retpwptr == NULL) {
 			efree(pwbuf);
 			return "";
 		}
@@ -2581,8 +2579,23 @@ PHPAPI int php_execute_script(zend_file_handle *primary_file TSRMLS_DC)
 #endif
 			zend_set_timeout(INI_INT("max_execution_time"), 0);
 		}
-		retval = (zend_execute_scripts(ZEND_REQUIRE TSRMLS_CC, NULL, 3, prepend_file_p, primary_file, append_file_p) == SUCCESS);
 
+		/*
+		   If cli primary file has shabang line and there is a prepend file,
+		   the `start_lineno` will be used by prepend file but not primary file,
+		   save it and restore after prepend file been executed.
+		 */
+		if (CG(start_lineno) && prepend_file_p) {
+			int orig_start_lineno = CG(start_lineno);
+
+			CG(start_lineno) = 0;
+			if (zend_execute_scripts(ZEND_REQUIRE TSRMLS_CC, NULL, 1, prepend_file_p) == SUCCESS) {
+				CG(start_lineno) = orig_start_lineno;
+				retval = (zend_execute_scripts(ZEND_REQUIRE TSRMLS_CC, NULL, 2, primary_file, append_file_p) == SUCCESS);
+			}
+		} else {
+			retval = (zend_execute_scripts(ZEND_REQUIRE TSRMLS_CC, NULL, 3, prepend_file_p, primary_file, append_file_p) == SUCCESS);
+		}
 	} zend_end_try();
 
 #if HAVE_BROKEN_GETCWD

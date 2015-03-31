@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | PHP Version 5                                                        |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1997-2014 The PHP Group                                |
+   | Copyright (c) 1997-2015 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -841,13 +841,13 @@ static int add_oid_section(struct php_x509_request * req TSRMLS_DC) /* {{{ */
 			req->config_filename, req->var, req->req_config TSRMLS_CC) == FAILURE) return FAILURE
 
 #define SET_OPTIONAL_STRING_ARG(key, varname, defval)	\
-	if (optional_args && zend_hash_find(Z_ARRVAL_P(optional_args), key, sizeof(key), (void**)&item) == SUCCESS) \
+	if (optional_args && zend_hash_find(Z_ARRVAL_P(optional_args), key, sizeof(key), (void**)&item) == SUCCESS && Z_TYPE_PP(item) == IS_STRING) \
 		varname = Z_STRVAL_PP(item); \
 	else \
 		varname = defval
 
 #define SET_OPTIONAL_LONG_ARG(key, varname, defval)	\
-	if (optional_args && zend_hash_find(Z_ARRVAL_P(optional_args), key, sizeof(key), (void**)&item) == SUCCESS) \
+	if (optional_args && zend_hash_find(Z_ARRVAL_P(optional_args), key, sizeof(key), (void**)&item) == SUCCESS && Z_TYPE_PP(item) == IS_LONG) \
 		varname = Z_LVAL_PP(item); \
 	else \
 		varname = defval
@@ -907,7 +907,8 @@ static int php_openssl_parse_config(struct php_x509_request * req, zval * option
 		}
 	}
 
-	if (req->priv_key_encrypt && optional_args && zend_hash_find(Z_ARRVAL_P(optional_args), "encrypt_key_cipher", sizeof("encrypt_key_cipher"), (void**)&item) == SUCCESS) {
+	if (req->priv_key_encrypt && optional_args && zend_hash_find(Z_ARRVAL_P(optional_args), "encrypt_key_cipher", sizeof("encrypt_key_cipher"), (void**)&item) == SUCCESS 
+		&& Z_TYPE_PP(item) == IS_LONG) {
 		long cipher_algo = Z_LVAL_PP(item);
 		const EVP_CIPHER* cipher = php_openssl_get_evp_cipher_from_algo(cipher_algo);
 		if (cipher == NULL) {
@@ -974,11 +975,13 @@ static int php_openssl_load_rand_file(const char * file, int *egdsocket, int *se
 
 	if (file == NULL) {
 		file = RAND_file_name(buffer, sizeof(buffer));
+#ifdef HAVE_RAND_EGD
 	} else if (RAND_egd(file) > 0) {
 		/* if the given filename is an EGD socket, don't
 		 * write anything back to it */
 		*egdsocket = 1;
 		return SUCCESS;
+#endif
 	}
 	if (file == NULL || !RAND_load_file(file, -1)) {
 		if (RAND_status() == 0) {
@@ -1531,7 +1534,7 @@ cleanup:
 		efree(spkstr);
 	}
 
-	if (strlen(s) <= 0) {
+	if (s && strlen(s) <= 0) {
 		RETVAL_FALSE;
 	}
 
@@ -1759,7 +1762,7 @@ PHP_FUNCTION(openssl_x509_export)
 }
 /* }}} */
 
-static int php_openssl_x509_fingerprint(X509 *peer, const char *method, zend_bool raw, char **out, int *out_len TSRMLS_DC)
+int php_openssl_x509_fingerprint(X509 *peer, const char *method, zend_bool raw, char **out, int *out_len TSRMLS_DC)
 {
 	unsigned char md[EVP_MAX_MD_SIZE];
 	const EVP_MD *mdtype;
@@ -1784,61 +1787,6 @@ static int php_openssl_x509_fingerprint(X509 *peer, const char *method, zend_boo
 	}
 
 	return SUCCESS;
-}
-
-static int php_x509_fingerprint_cmp(X509 *peer, const char *method, const char *expected TSRMLS_DC)
-{
-	char *fingerprint;
-	int fingerprint_len;
-	int result = -1;
-
-	if (php_openssl_x509_fingerprint(peer, method, 0, &fingerprint, &fingerprint_len TSRMLS_CC) == SUCCESS) {
-		result = strcmp(expected, fingerprint);
-		efree(fingerprint);
-	}
-
-	return result;
-}
-
-zend_bool php_x509_fingerprint_match(X509 *peer, zval *val TSRMLS_DC)
-{
-	if (Z_TYPE_P(val) == IS_STRING) {
-		const char *method = NULL;
-
-		switch (Z_STRLEN_P(val)) {
-			case 32:
-				method = "md5";
-				break;
-
-			case 40:
-				method = "sha1";
-				break;
-		}
-
-		return method && php_x509_fingerprint_cmp(peer, method, Z_STRVAL_P(val) TSRMLS_CC) == 0;
-	} else if (Z_TYPE_P(val) == IS_ARRAY) {
-		HashPosition pos;
-		zval **current;
-		char *key;
-		uint key_len;
-		ulong key_index;
-
-		for (zend_hash_internal_pointer_reset_ex(Z_ARRVAL_P(val), &pos);
-			zend_hash_get_current_data_ex(Z_ARRVAL_P(val), (void **)&current, &pos) == SUCCESS;
-			zend_hash_move_forward_ex(Z_ARRVAL_P(val), &pos)
-		) {
-			int key_type = zend_hash_get_current_key_ex(Z_ARRVAL_P(val), &key, &key_len, &key_index, 0, &pos);
-
-			if (key_type == HASH_KEY_IS_STRING 
-				&& Z_TYPE_PP(current) == IS_STRING
-				&& php_x509_fingerprint_cmp(peer, key, Z_STRVAL_PP(current) TSRMLS_CC) != 0
-			) {
-				return 0;
-			}
-		}
-		return 1;
-	}
-	return 0;
 }
 
 PHP_FUNCTION(openssl_x509_fingerprint)
@@ -1981,7 +1929,7 @@ PHP_FUNCTION(openssl_x509_parse)
 	zval ** zcert;
 	X509 * cert = NULL;
 	long certresource = -1;
-	int i;
+	int i, sig_nid;
 	zend_bool useshortnames = 1;
 	char * tmpstr;
 	zval * subitem;
@@ -2028,11 +1976,12 @@ PHP_FUNCTION(openssl_x509_parse)
 	if (tmpstr) {
 		add_assoc_string(return_value, "alias", tmpstr, 1);
 	}
-/*
-	add_assoc_long(return_value, "signaturetypeLONG", X509_get_signature_type(cert));
-	add_assoc_string(return_value, "signaturetype", OBJ_nid2sn(X509_get_signature_type(cert)), 1);
-	add_assoc_string(return_value, "signaturetypeLN", OBJ_nid2ln(X509_get_signature_type(cert)), 1);
-*/
+
+	sig_nid = OBJ_obj2nid((cert)->sig_alg->algorithm);
+	add_assoc_string(return_value, "signatureTypeSN", (char*)OBJ_nid2sn(sig_nid), 1);
+	add_assoc_string(return_value, "signatureTypeLN", (char*)OBJ_nid2ln(sig_nid), 1);
+	add_assoc_long(return_value, "signatureTypeNID", sig_nid);
+
 	MAKE_STD_ZVAL(subitem);
 	array_init(subitem);
 
@@ -2455,7 +2404,7 @@ PHP_FUNCTION(openssl_pkcs12_export_to_file)
 	}
 
 	/* parse extra config from args array, promote this to an extra function */
-	if (args && zend_hash_find(Z_ARRVAL_P(args), "friendly_name", sizeof("friendly_name"), (void**)&item) == SUCCESS)
+	if (args && zend_hash_find(Z_ARRVAL_P(args), "friendly_name", sizeof("friendly_name"), (void**)&item) == SUCCESS && Z_TYPE_PP(item) == IS_STRING)
 		friendly_name = Z_STRVAL_PP(item);
 	/* certpbe (default RC2-40)
 	   keypbe (default 3DES)
@@ -2533,7 +2482,7 @@ PHP_FUNCTION(openssl_pkcs12_export)
 	}
 
 	/* parse extra config from args array, promote this to an extra function */
-	if (args && zend_hash_find(Z_ARRVAL_P(args), "friendly_name", sizeof("friendly_name"), (void**)&item) == SUCCESS)
+	if (args && zend_hash_find(Z_ARRVAL_P(args), "friendly_name", sizeof("friendly_name"), (void**)&item) == SUCCESS && Z_TYPE_PP(item) == IS_STRING)
 		friendly_name = Z_STRVAL_PP(item);
 
 	if (args && zend_hash_find(Z_ARRVAL_P(args), "extracerts", sizeof("extracerts"), (void**)&item) == SUCCESS)
@@ -3672,9 +3621,12 @@ PHP_FUNCTION(openssl_pkey_export_to_file)
 {
 	struct php_x509_request req;
 	zval ** zpkey, * args = NULL;
-	char * passphrase = NULL; int passphrase_len = 0;
-	char * filename = NULL; int filename_len = 0;
+	char * passphrase = NULL; 
+	int passphrase_len = 0;
+	char * filename = NULL; 
+	int filename_len = 0;
 	long key_resource = -1;
+	int pem_write = 0;
 	EVP_PKEY * key;
 	BIO * bio_out = NULL;
 	const EVP_CIPHER * cipher;
@@ -3709,7 +3661,19 @@ PHP_FUNCTION(openssl_pkey_export_to_file)
 		} else {
 			cipher = NULL;
 		}
-		if (PEM_write_bio_PrivateKey(bio_out, key, cipher, (unsigned char *)passphrase, passphrase_len, NULL, NULL)) {
+
+		switch (EVP_PKEY_type(key->type)) {
+#ifdef HAVE_EVP_PKEY_EC
+			case EVP_PKEY_EC:
+				pem_write = PEM_write_bio_ECPrivateKey(bio_out, EVP_PKEY_get1_EC_KEY(key), cipher, (unsigned char *)passphrase, passphrase_len, NULL, NULL);
+				break;
+#endif
+			default:
+				pem_write = PEM_write_bio_PrivateKey(bio_out, key, cipher, (unsigned char *)passphrase, passphrase_len, NULL, NULL);
+				break;
+		}
+
+		if (pem_write) {
 			/* Success!
 			 * If returning the output as a string, do so now */
 			RETVAL_TRUE;
@@ -3732,8 +3696,10 @@ PHP_FUNCTION(openssl_pkey_export)
 {
 	struct php_x509_request req;
 	zval ** zpkey, * args = NULL, *out;
-	char * passphrase = NULL; int passphrase_len = 0;
+	char * passphrase = NULL; 
+	int passphrase_len = 0;
 	long key_resource = -1;
+	int pem_write = 0;
 	EVP_PKEY * key;
 	BIO * bio_out = NULL;
 	const EVP_CIPHER * cipher;
@@ -3764,7 +3730,19 @@ PHP_FUNCTION(openssl_pkey_export)
 		} else {
 			cipher = NULL;
 		}
-		if (PEM_write_bio_PrivateKey(bio_out, key, cipher, (unsigned char *)passphrase, passphrase_len, NULL, NULL)) {
+
+		switch (EVP_PKEY_type(key->type)) {
+#ifdef HAVE_EVP_PKEY_EC
+			case EVP_PKEY_EC:
+				pem_write = PEM_write_bio_ECPrivateKey(bio_out, EVP_PKEY_get1_EC_KEY(key), cipher, (unsigned char *)passphrase, passphrase_len, NULL, NULL);
+				break;
+#endif
+			default:
+				pem_write = PEM_write_bio_PrivateKey(bio_out, key, cipher, (unsigned char *)passphrase, passphrase_len, NULL, NULL);
+				break;
+		}
+
+		if (pem_write) {
 			/* Success!
 			 * If returning the output as a string, do so now */
 
@@ -3935,6 +3913,40 @@ PHP_FUNCTION(openssl_pkey_get_details)
 #ifdef HAVE_EVP_PKEY_EC
 		case EVP_PKEY_EC:
 			ktype = OPENSSL_KEYTYPE_EC;
+			if (pkey->pkey.ec != NULL) {
+				zval *ec;
+				const EC_GROUP *ec_group;
+				int nid;
+				char *crv_sn;
+				ASN1_OBJECT *obj;
+				// openssl recommends a buffer length of 80
+				char oir_buf[80];
+
+				ec_group = EC_KEY_get0_group(EVP_PKEY_get1_EC_KEY(pkey));
+
+				// Curve nid (numerical identifier) used for ASN1 mapping
+				nid = EC_GROUP_get_curve_name(ec_group);
+				if (nid == NID_undef) {
+					break;
+				}
+				ALLOC_INIT_ZVAL(ec);
+				array_init(ec);
+
+				// Short object name
+				crv_sn = (char*) OBJ_nid2sn(nid);
+				if (crv_sn != NULL) {
+					add_assoc_string(ec, "curve_name", crv_sn, 1);
+				}
+
+				obj = OBJ_nid2obj(nid);
+				if (obj != NULL) {
+					int oir_len = OBJ_obj2txt(oir_buf, sizeof(oir_buf), obj, 1);
+					add_assoc_stringl(ec, "curve_oid", (char*)oir_buf, oir_len, 1);
+					ASN1_OBJECT_free(obj);
+				}
+
+				add_assoc_zval(return_value, "ec", ec);
+			}
 			break;
 #endif
 		default:
@@ -4269,7 +4281,7 @@ PHP_FUNCTION(openssl_pkcs7_sign)
 	char * outfilename;	int outfilename_len;
 	char * extracertsfilename = NULL; int extracertsfilename_len;
 
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "ppZZa!|lp",
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "ppZZa!|lp!",
 				&infilename, &infilename_len, &outfilename, &outfilename_len,
 				&zcert, &zprivkey, &zheaders, &flags, &extracertsfilename,
 				&extracertsfilename_len) == FAILURE) {

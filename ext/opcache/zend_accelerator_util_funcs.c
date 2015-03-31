@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | Zend OPcache                                                         |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1998-2014 The PHP Group                                |
+   | Copyright (c) 1998-2015 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -795,6 +795,11 @@ static void zend_class_copy_ctor(zend_class_entry **pce)
 	zend_update_inherited_handler(__callstatic);
 #endif
 
+#if ZEND_EXTENSION_API_NO >= PHP_5_6_X_API_NO
+/* 5.6 stuff */
+	zend_update_inherited_handler(__debugInfo);
+#endif
+
 #if ZEND_EXTENSION_API_NO > PHP_5_3_X_API_NO
 /* 5.4 traits */
 	if (ce->trait_aliases) {
@@ -1041,7 +1046,6 @@ zend_op_array* zend_accel_load_script(zend_persistent_script *persistent_script,
 		if (zend_hash_num_elements(&persistent_script->class_table) > 0) {
 			zend_accel_class_hash_copy(CG(class_table), &persistent_script->class_table, NULL TSRMLS_CC);
 		}
-		free_persistent_script(persistent_script, 0); /* free only hashes */
 	}
 
 #if ZEND_EXTENSION_API_NO >= PHP_5_3_X_API_NO
@@ -1052,6 +1056,10 @@ zend_op_array* zend_accel_load_script(zend_persistent_script *persistent_script,
 		CG(compiled_filename) = orig_compiled_filename;
 	}
 #endif
+
+	if (!from_shared_memory) {
+		free_persistent_script(persistent_script, 0); /* free only hashes */
+	}
 
 	return op_array;
 }

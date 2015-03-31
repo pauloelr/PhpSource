@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | PHP Version 5                                                        |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1997-2014 The PHP Group                                |
+   | Copyright (c) 1997-2015 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -644,11 +644,10 @@ static size_t php_ftp_dirstream_read(php_stream *stream, char *buf, size_t count
 	efree(basename);
 
 	/* Trim off trailing whitespace characters */
-	tmp_len--;
-	while (tmp_len >= 0 &&
-			(ent->d_name[tmp_len] == '\n' || ent->d_name[tmp_len] == '\r' ||
-			 ent->d_name[tmp_len] == '\t' || ent->d_name[tmp_len] == ' ')) {
-		ent->d_name[tmp_len--] = '\0';
+	while (tmp_len > 0 &&
+			(ent->d_name[tmp_len - 1] == '\n' || ent->d_name[tmp_len - 1] == '\r' ||
+			 ent->d_name[tmp_len - 1] == '\t' || ent->d_name[tmp_len - 1] == ' ')) {
+		ent->d_name[--tmp_len] = '\0';
 	}
 
 	return sizeof(php_stream_dirent);

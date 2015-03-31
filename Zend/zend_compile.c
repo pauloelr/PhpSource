@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | Zend Engine                                                          |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1998-2014 Zend Technologies Ltd. (http://www.zend.com) |
+   | Copyright (c) 1998-2015 Zend Technologies Ltd. (http://www.zend.com) |
    +----------------------------------------------------------------------+
    | This source file is subject to version 2.00 of the Zend license,     |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -1931,8 +1931,11 @@ void zend_do_receive_param(zend_uchar op, znode *varname, const znode *initializ
 			if (class_type->u.constant.type == IS_ARRAY) {
 				cur_arg_info->type_hint = IS_ARRAY;
 				if (op == ZEND_RECV_INIT) {
-					if (Z_TYPE(initialization->u.constant) == IS_NULL || (Z_TYPE(initialization->u.constant) == IS_CONSTANT && !strcasecmp(Z_STRVAL(initialization->u.constant), "NULL")) || Z_TYPE(initialization->u.constant) == IS_CONSTANT_AST) {
+					if (Z_TYPE(initialization->u.constant) == IS_NULL || (Z_TYPE(initialization->u.constant) == IS_CONSTANT && !strcasecmp(Z_STRVAL(initialization->u.constant), "NULL"))) {
 						cur_arg_info->allow_null = 1;
+					} else if (IS_CONSTANT_TYPE(Z_TYPE(initialization->u.constant))) {
+						/* delay constant resolution and check to run-time */
+						cur_arg_info->allow_null = 0;
 					} else if (Z_TYPE(initialization->u.constant) != IS_ARRAY) {
 						zend_error_noreturn(E_COMPILE_ERROR, "Default value for parameters with array type hint can only be an array or NULL");
 					}
@@ -1940,8 +1943,11 @@ void zend_do_receive_param(zend_uchar op, znode *varname, const znode *initializ
 			} else if (class_type->u.constant.type == IS_CALLABLE) {
 				cur_arg_info->type_hint = IS_CALLABLE;
 				if (op == ZEND_RECV_INIT) {
-					if (Z_TYPE(initialization->u.constant) == IS_NULL || (Z_TYPE(initialization->u.constant) == IS_CONSTANT && !strcasecmp(Z_STRVAL(initialization->u.constant), "NULL")) || Z_TYPE(initialization->u.constant) == IS_CONSTANT_AST) {
+					if (Z_TYPE(initialization->u.constant) == IS_NULL || (Z_TYPE(initialization->u.constant) == IS_CONSTANT && !strcasecmp(Z_STRVAL(initialization->u.constant), "NULL"))) {
 						cur_arg_info->allow_null = 1;
+					} else if (IS_CONSTANT_TYPE(Z_TYPE(initialization->u.constant))) {
+						/* delay constant resolution and check to run-time */
+						cur_arg_info->allow_null = 0;
 					} else {
 						zend_error_noreturn(E_COMPILE_ERROR, "Default value for parameters with callable type hint can only be NULL");
 					}
@@ -1955,8 +1961,11 @@ void zend_do_receive_param(zend_uchar op, znode *varname, const znode *initializ
 				cur_arg_info->class_name = Z_STRVAL(class_type->u.constant);
 				cur_arg_info->class_name_len = Z_STRLEN(class_type->u.constant);
 				if (op == ZEND_RECV_INIT) {
-					if (Z_TYPE(initialization->u.constant) == IS_NULL || (Z_TYPE(initialization->u.constant) == IS_CONSTANT && !strcasecmp(Z_STRVAL(initialization->u.constant), "NULL")) || Z_TYPE(initialization->u.constant) == IS_CONSTANT_AST) {
+					if (Z_TYPE(initialization->u.constant) == IS_NULL || (Z_TYPE(initialization->u.constant) == IS_CONSTANT && !strcasecmp(Z_STRVAL(initialization->u.constant), "NULL"))) {
 						cur_arg_info->allow_null = 1;
+					} else if (IS_CONSTANT_TYPE(Z_TYPE(initialization->u.constant))) {
+						/* delay constant resolution and check to run-time */
+						cur_arg_info->allow_null = 0;
 					} else {
 						zend_error_noreturn(E_COMPILE_ERROR, "Default value for parameters with a class type hint can only be NULL");
 					}
@@ -2204,6 +2213,12 @@ void zend_do_resolve_class_name(znode *result, znode *class_name, int is_static 
 		case ZEND_FETCH_CLASS_SELF:
 			if (!CG(active_class_entry)) {
 				zend_error_noreturn(E_COMPILE_ERROR, "Cannot access self::class when no class scope is active");
+			}
+			if (CG(active_class_entry)->ce_flags & ZEND_ACC_TRAIT) {
+				constant_name.op_type = IS_CONST;
+				ZVAL_STRINGL(&constant_name.u.constant, "class", sizeof("class")-1, 1);
+				zend_do_fetch_constant(result, class_name, &constant_name, ZEND_RT, 1 TSRMLS_CC);
+				break;
 			}
 			zval_dtor(&class_name->u.constant);
 			class_name->op_type = IS_CONST;
@@ -3258,7 +3273,7 @@ static zend_bool zend_do_perform_implementation_check(const zend_function *fe, c
 	 * go through all the parameters of the function and not just those present in the
 	 * prototype. */
 	num_args = proto->common.num_args;
-	if ((fe->common.fn_flags & ZEND_ACC_VARIADIC)
+	if ((proto->common.fn_flags & ZEND_ACC_VARIADIC)
 		&& fe->common.num_args > proto->common.num_args) {
 		num_args = fe->common.num_args;
 	}
@@ -3964,7 +3979,7 @@ static void zend_add_magic_methods(zend_class_entry* ce, const char* mname, uint
 	if (!strncmp(mname, ZEND_CLONE_FUNC_NAME, mname_len)) {
 		ce->clone = fe; fe->common.fn_flags |= ZEND_ACC_CLONE;
 	} else if (!strncmp(mname, ZEND_CONSTRUCTOR_FUNC_NAME, mname_len)) {
-		if (ce->constructor) {
+		if (ce->constructor && (!ce->parent || ce->constructor != ce->parent->constructor)) {
 			zend_error_noreturn(E_COMPILE_ERROR, "%s has colliding constructor definitions coming from traits", ce->name);
 		}
 		ce->constructor = fe; fe->common.fn_flags |= ZEND_ACC_CTOR;
@@ -3991,7 +4006,7 @@ static void zend_add_magic_methods(zend_class_entry* ce, const char* mname, uint
 		zend_str_tolower_copy(lowercase_name, ce->name, ce->name_length);
 		lowercase_name = (char*)zend_new_interned_string(lowercase_name, ce->name_length + 1, 1 TSRMLS_CC);
 		if (!memcmp(mname, lowercase_name, mname_len)) {
-			if (ce->constructor) {
+			if (ce->constructor && (!ce->parent || ce->constructor != ce->parent->constructor)) {
 				zend_error_noreturn(E_COMPILE_ERROR, "%s has colliding constructor definitions coming from traits", ce->name);
 			}
 			ce->constructor = fe;
@@ -4196,6 +4211,7 @@ static void zend_check_trait_usage(zend_class_entry *ce, zend_class_entry *trait
 static void zend_traits_init_trait_structures(zend_class_entry *ce TSRMLS_DC) /* {{{ */
 {
 	size_t i, j = 0;
+	zend_trait_precedence **precedences;
 	zend_trait_precedence *cur_precedence;
 	zend_trait_method_reference *cur_method_ref;
 	char *lcname;
@@ -4204,7 +4220,9 @@ static void zend_traits_init_trait_structures(zend_class_entry *ce TSRMLS_DC) /*
 	/* resolve class references */
 	if (ce->trait_precedences) {
 		i = 0;
-		while ((cur_precedence = ce->trait_precedences[i])) {
+		precedences = ce->trait_precedences;
+		ce->trait_precedences = NULL;
+		while ((cur_precedence = precedences[i])) {
 			/** Resolve classes for all precedence operations. */
 			if (cur_precedence->exclude_from_classes) {
 				cur_method_ref = cur_precedence->trait_method;
@@ -4246,8 +4264,8 @@ static void zend_traits_init_trait_structures(zend_class_entry *ce TSRMLS_DC) /*
 
 					/* make sure that the trait method is not from a class mentioned in
 					 exclude_from_classes, for consistency */
-					if (cur_precedence->trait_method->ce == cur_precedence->exclude_from_classes[i]) {
-						zend_error_noreturn(E_COMPILE_ERROR,
+					if (cur_precedence->trait_method->ce == cur_precedence->exclude_from_classes[j]) {
+						zend_error(E_COMPILE_ERROR,
 								   "Inconsistent insteadof definition. "
 								   "The method %s is to be used from %s, but %s is also on the exclude list",
 								   cur_method_ref->method_name,
@@ -4261,6 +4279,7 @@ static void zend_traits_init_trait_structures(zend_class_entry *ce TSRMLS_DC) /*
 			}
 			i++;
 		}
+		ce->trait_precedences = precedences;
 	}
 
 	if (ce->trait_aliases) {
@@ -4328,22 +4347,37 @@ static void zend_do_traits_method_binding(zend_class_entry *ce TSRMLS_DC) /* {{{
 	for (i = 0; i < ce->num_traits; i++) {
 		if (ce->trait_precedences) {
 			HashTable exclude_table;
+			zend_trait_precedence **precedences;
 
 			/* TODO: revisit this start size, may be its not optimal */
 			zend_hash_init_ex(&exclude_table, 2, NULL, NULL, 0, 0);
 
-			zend_traits_compile_exclude_table(&exclude_table, ce->trait_precedences, ce->traits[i]);
+			precedences = ce->trait_precedences;
+			ce->trait_precedences = NULL;
+			zend_traits_compile_exclude_table(&exclude_table, precedences, ce->traits[i]);
 
 			/* copies functions, applies defined aliasing, and excludes unused trait methods */
 			zend_hash_apply_with_arguments(&ce->traits[i]->function_table TSRMLS_CC, (apply_func_args_t)zend_traits_copy_functions, 3, ce, &overriden, &exclude_table);
 
 			zend_hash_destroy(&exclude_table);
+			ce->trait_precedences = precedences;
 		} else {
 			zend_hash_apply_with_arguments(&ce->traits[i]->function_table TSRMLS_CC, (apply_func_args_t)zend_traits_copy_functions, 3, ce, &overriden, NULL);
 		}
 	}
 
     zend_hash_apply_with_argument(&ce->function_table, (apply_func_arg_t)zend_fixup_trait_method, ce TSRMLS_CC);
+
+	if (ce->trait_precedences) {
+		i = 0;
+		while (ce->trait_precedences[i]) {
+			if (ce->trait_precedences[i]->exclude_from_classes) {
+				efree(ce->trait_precedences[i]->exclude_from_classes);
+				ce->trait_precedences[i]->exclude_from_classes = NULL;
+			}
+			i++;
+		}
+	}
 
 	if (overriden) {
 		zend_hash_destroy(overriden);
@@ -6337,6 +6371,15 @@ void zend_do_foreach_begin(znode *foreach_token, znode *open_brackets_token, zno
 		/* save the location of FETCH_W instruction(s) */
 		open_brackets_token->u.op.opline_num = get_next_op_number(CG(active_op_array));
 		zend_do_end_variable_parse(array, BP_VAR_W, 0 TSRMLS_CC);
+
+		if (zend_is_function_or_method_call(array)) {
+			opline = get_next_op(CG(active_op_array) TSRMLS_CC);
+			opline->opcode = ZEND_SEPARATE;
+			SET_NODE(opline->op1, array);
+			SET_UNUSED(opline->op2);
+			opline->result_type = IS_VAR;
+			opline->result.var = opline->op1.var;
+		}
 	} else {
 		is_variable = 0;
 		open_brackets_token->u.op.opline_num = get_next_op_number(CG(active_op_array));

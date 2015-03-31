@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | PHP Version 5                                                        |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1997-2014 The PHP Group                                |
+   | Copyright (c) 1997-2015 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -673,11 +673,15 @@ void sapi_cgi_log_fastcgi(int level, char *message, size_t len)
 	 * - the message is not empty
 	 */
 	if (CGIG(fcgi_logging) && request && message && len > 0) {
+		ssize_t ret;
 		char *buf = malloc(len + 2);
 		memcpy(buf, message, len);
 		memcpy(buf + len, "\n", sizeof("\n"));
-		fcgi_write(request, FCGI_STDERR, buf, len+1);
+		ret = fcgi_write(request, FCGI_STDERR, buf, len + 1);
 		free(buf);
+		if (ret < 0) {
+			php_handle_aborted_connection();
+		}
 	}
 }
 /* }}} */
@@ -1148,6 +1152,22 @@ static void init_request_info(TSRMLS_D)
 				TRANSLATE_SLASHES(env_document_root);
 			}
 
+			if (!apache_was_here && env_path_translated != NULL && env_redirect_url != NULL &&
+			    env_path_translated != script_path_translated &&
+			    strcmp(env_path_translated, script_path_translated) != 0) {
+				/*
+				 * pretty much apache specific.  If we have a redirect_url
+				 * then our script_filename and script_name point to the
+				 * php executable
+				 * we don't want to do this for the new mod_proxy_fcgi approach,
+				 * where redirect_url may also exist but the below will break
+				 * with rewrites to PATH_INFO, hence the !apache_was_here check
+				 */
+				script_path_translated = env_path_translated;
+				/* we correct SCRIPT_NAME now in case we don't have PATH_INFO */
+				env_script_name = env_redirect_url;
+			}
+
 #ifdef __riscos__
 			/* Convert path to unix format*/
 			__riscosify_control |= __RISCOSIFY_DONT_CHECK_DIR;
@@ -1221,6 +1241,17 @@ static void init_request_info(TSRMLS_D)
 										SG(request_info).request_uri = orig_script_name;
 									}
 									path_info[0] = old;
+								} else if (apache_was_here && env_script_name) {
+									/* Using mod_proxy_fcgi and ProxyPass, apache cannot set PATH_INFO
+									 * As we can extract PATH_INFO from PATH_TRANSLATED
+									 * it is probably also in SCRIPT_NAME and need to be removed
+									 */
+									int snlen = strlen(env_script_name);
+									if (snlen>slen && !strcmp(env_script_name+snlen-slen, path_info)) {
+										_sapi_cgibin_putenv("ORIG_SCRIPT_NAME", orig_script_name TSRMLS_CC);
+										env_script_name[snlen-slen] = 0;
+										SG(request_info).request_uri = _sapi_cgibin_putenv("SCRIPT_NAME", env_script_name TSRMLS_CC);
+									}
 								}
 								env_path_info = _sapi_cgibin_putenv("PATH_INFO", path_info TSRMLS_CC);
 							}
@@ -1324,6 +1355,18 @@ static void init_request_info(TSRMLS_D)
 						_sapi_cgibin_putenv("ORIG_SCRIPT_FILENAME", orig_script_filename TSRMLS_CC);
 					}
 					script_path_translated = _sapi_cgibin_putenv("SCRIPT_FILENAME", script_path_translated TSRMLS_CC);
+				}
+				if (!apache_was_here && env_redirect_url) {
+					/* if we used PATH_TRANSLATED to work around Apache mod_fastcgi (but not mod_proxy_fcgi,
+					 * hence !apache_was_here) weirdness, strip info accordingly */
+					if (orig_path_info) {
+						_sapi_cgibin_putenv("ORIG_PATH_INFO", orig_path_info TSRMLS_CC);
+						_sapi_cgibin_putenv("PATH_INFO", NULL TSRMLS_CC);
+					}
+					if (orig_path_translated) {
+						_sapi_cgibin_putenv("ORIG_PATH_TRANSLATED", orig_path_translated TSRMLS_CC);
+						_sapi_cgibin_putenv("PATH_TRANSLATED", NULL TSRMLS_CC);
+					}
 				}
 				if (env_script_name != orig_script_name) {
 					if (orig_script_name) {
@@ -1709,9 +1752,9 @@ int main(int argc, char *argv[])
 				SG(request_info).no_headers = 1;
 
 #if ZEND_DEBUG
-				php_printf("PHP %s (%s) (built: %s %s) (DEBUG)\nCopyright (c) 1997-2014 The PHP Group\n%s", PHP_VERSION, sapi_module.name, __DATE__,        __TIME__, get_zend_version());
+				php_printf("PHP %s (%s) (built: %s %s) (DEBUG)\nCopyright (c) 1997-2015 The PHP Group\n%s", PHP_VERSION, sapi_module.name, __DATE__,        __TIME__, get_zend_version());
 #else
-				php_printf("PHP %s (%s) (built: %s %s)\nCopyright (c) 1997-2014 The PHP Group\n%s", PHP_VERSION, sapi_module.name, __DATE__, __TIME__,      get_zend_version());
+				php_printf("PHP %s (%s) (built: %s %s)\nCopyright (c) 1997-2015 The PHP Group\n%s", PHP_VERSION, sapi_module.name, __DATE__, __TIME__,      get_zend_version());
 #endif
 				php_request_shutdown((void *) 0);
 				fcgi_shutdown();

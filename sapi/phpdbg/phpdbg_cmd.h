@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | PHP Version 5                                                        |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1997-2014 The PHP Group                                |
+   | Copyright (c) 1997-2015 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -141,7 +141,6 @@ PHPDBG_API void phpdbg_stack_free(phpdbg_param_t *stack);
 /*
 * Parameter Management
 */
-PHPDBG_API phpdbg_param_type phpdbg_parse_param(const char*, size_t, phpdbg_param_t* TSRMLS_DC);
 PHPDBG_API void phpdbg_clear_param(phpdbg_param_t* TSRMLS_DC);
 PHPDBG_API void phpdbg_copy_param(const phpdbg_param_t*, phpdbg_param_t* TSRMLS_DC);
 PHPDBG_API zend_bool phpdbg_match_param(const phpdbg_param_t *, const phpdbg_param_t * TSRMLS_DC);

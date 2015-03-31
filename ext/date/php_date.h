@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | PHP Version 5                                                        |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1997-2014 The PHP Group                                |
+   | Copyright (c) 1997-2015 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -50,6 +50,7 @@ PHP_FUNCTION(getdate);
 PHP_METHOD(DateTime, __construct);
 PHP_METHOD(DateTime, __wakeup);
 PHP_METHOD(DateTime, __set_state);
+PHP_METHOD(DateTime, createFromImmutable);
 PHP_FUNCTION(date_create);
 PHP_FUNCTION(date_create_immutable);
 PHP_FUNCTION(date_create_from_format);
@@ -106,6 +107,9 @@ PHP_FUNCTION(date_interval_create_from_date_string);
 PHP_METHOD(DatePeriod, __construct);
 PHP_METHOD(DatePeriod, __wakeup);
 PHP_METHOD(DatePeriod, __set_state);
+PHP_METHOD(DatePeriod, getStartDate);
+PHP_METHOD(DatePeriod, getEndDate);
+PHP_METHOD(DatePeriod, getDateInterval);
 
 /* Options and Configuration */
 PHP_FUNCTION(date_default_timezone_set);
@@ -194,6 +198,7 @@ PHPAPI timelib_tzinfo *get_timezone_info(TSRMLS_D);
 
 /* Grabbing CE's so that other exts can use the date objects too */
 PHPAPI zend_class_entry *php_date_get_date_ce(void);
+PHPAPI zend_class_entry *php_date_get_immutable_ce(void);
 PHPAPI zend_class_entry *php_date_get_timezone_ce(void);
 
 /* Functions for creating DateTime objects, and initializing them from a string */

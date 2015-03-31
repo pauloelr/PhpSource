@@ -1197,7 +1197,6 @@ apprentice_load(struct magic_set *ms, const char *fn, int action)
 				if ((filearr = CAST(char **,
 				    erealloc(filearr, mlen))) == NULL) {
 					file_oomem(ms, mlen);
-					efree(mfn);
 					php_stream_closedir(dir);
 					errs++;
 					goto out;
@@ -1272,7 +1271,7 @@ file_signextend(struct magic_set *ms, struct magic *m, uint64_t v)
 		 * the sign extension must have happened.
 		 */
 		case FILE_BYTE:
-			v = (char) v;
+			v = (signed char) v;
 			break;
 		case FILE_SHORT:
 		case FILE_BESHORT:
@@ -2612,8 +2611,7 @@ apprentice_map(struct magic_set *ms, const char *fn)
 
 	if ((map = CAST(struct magic_map *, ecalloc(1, sizeof(*map)))) == NULL) {
 		file_oomem(ms, sizeof(*map));
-		efree(map);
-		goto error;
+		return NULL;
 	}
 
 	if (fn == NULL) {
@@ -2626,7 +2624,7 @@ apprentice_map(struct magic_set *ms, const char *fn)
 	return to give apprentice_load() a chance. */
 	if (php_stream_stat_path_ex((char *)fn, 0, &st, NULL) == SUCCESS) {
                if (st.sb.st_mode & S_IFDIR) {
-                       goto error;
+                       return NULL;
                }
        }
 #endif

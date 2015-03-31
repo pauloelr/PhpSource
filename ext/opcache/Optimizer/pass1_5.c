@@ -252,6 +252,9 @@ if (ZEND_OPTIMIZER_PASS_1 & OPTIMIZATION_LEVEL) {
 						break;
 					}
 				}
+				if (Z_TYPE(c) == IS_CONSTANT_AST) {
+					break;
+				}
 				literal_dtor(&ZEND_OP2_LITERAL(opline));
 				MAKE_NOP(opline);
 				replace_tmp_by_const(op_array, opline, tv, &c TSRMLS_CC);
@@ -303,6 +306,9 @@ if (ZEND_OPTIMIZER_PASS_1 & OPTIMIZATION_LEVEL) {
 							Z_STRVAL(ZEND_OP2_LITERAL(opline)),
 							Z_STRLEN(ZEND_OP2_LITERAL(opline)) + 1,
 							(void **) &c) == SUCCESS) {
+						if (Z_TYPE_PP(c) == IS_CONSTANT_AST) {
+							break;
+						}
 						if (ZEND_IS_CONSTANT_TYPE(Z_TYPE_PP(c))) { 
 							if (!zend_get_persistent_constant(Z_STRVAL_PP(c), Z_STRLEN_PP(c), &t, 1 TSRMLS_CC) ||
 							    ZEND_IS_CONSTANT_TYPE(Z_TYPE(t))) {
@@ -374,7 +380,12 @@ if (ZEND_OPTIMIZER_PASS_1 & OPTIMIZATION_LEVEL) {
 							func->type == ZEND_INTERNAL_FUNCTION &&
 							func->module->type == MODULE_PERSISTENT) {
 						zval t;
-						ZVAL_BOOL(&t, 1);
+						if (Z_STRLEN(ZEND_OP1_LITERAL(opline)) == sizeof("is_callable") - 1 ||
+							   func->handler != ZEND_FN(display_disabled_function))	{
+							ZVAL_BOOL(&t, 1);
+						} else {
+							ZVAL_BOOL(&t, 0);
+						}
 						if (replace_var_by_const(op_array, opline + 1, ZEND_RESULT(opline).var, &t TSRMLS_CC)) {
 							literal_dtor(&ZEND_OP1_LITERAL(opline - 1));
 							MAKE_NOP((opline - 1));
@@ -444,9 +455,11 @@ if (ZEND_OPTIMIZER_PASS_1 & OPTIMIZATION_LEVEL) {
 							MAKE_NOP(opline);
 						}
 					}
-				} else if (Z_STRLEN(ZEND_OP1_LITERAL(opline)) == sizeof("strlen")-1 &&
-					!memcmp(Z_STRVAL(ZEND_OP1_LITERAL(opline)),
-						"strlen", sizeof("strlen")-1)) {
+				} else if ((!zend_hash_exists(&module_registry, "mbstring", sizeof("mbstring")) ||
+							zend_ini_long("mbstring.func_overload",
+								sizeof("mbstring.func_overload"), 0) < 2 /* MB_OVERLOAD_STRING */) &&
+						Z_STRLEN(ZEND_OP1_LITERAL(opline)) == sizeof("strlen") - 1 &&
+						!memcmp(Z_STRVAL(ZEND_OP1_LITERAL(opline)), "strlen", sizeof("strlen") - 1)) {
 					zval t;
 
 					ZVAL_LONG(&t, Z_STRLEN(ZEND_OP1_LITERAL(opline - 1)));

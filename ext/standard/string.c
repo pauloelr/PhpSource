@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | PHP Version 5                                                        |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1997-2014 The PHP Group                                |
+   | Copyright (c) 1997-2015 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -198,8 +198,18 @@ PHPAPI struct lconv *localeconv_r(struct lconv *out)
 	tsrm_mutex_lock( locale_mutex );
 # endif
 
+#if defined(PHP_WIN32) && defined(ZTS)
+	{
+		/* Even with the enabled per thread locale, localeconv
+			won't check any locale change in the master thread. */
+		_locale_t cur = _get_current_locale();
+
+		res = cur->locinfo->lconv;
+	}
+#else
 	/* localeconv doesn't return an error condition */
 	res = localeconv();
+#endif
 
 	*out = *res;
 
@@ -2738,11 +2748,12 @@ PHP_FUNCTION(lcfirst)
    Uppercase the first character of every word in a string */
 PHP_FUNCTION(ucwords)
 {
-	char *str;
+	char *str, *delims = " \t\r\n\f\v";
 	register char *r, *r_end;
-	int str_len;
+	int str_len, delims_len = 6;
+	char mask[256];
 
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "s", &str, &str_len) == FAILURE) {
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "s|s", &str, &str_len, &delims, &delims_len) == FAILURE) {
 		return;
 	}
 
@@ -2750,12 +2761,14 @@ PHP_FUNCTION(ucwords)
 		RETURN_EMPTY_STRING();
 	}
 
+	php_charmask((unsigned char *)delims, delims_len, mask TSRMLS_CC);
+
 	ZVAL_STRINGL(return_value, str, str_len, 1);
 	r = Z_STRVAL_P(return_value);
 
 	*r = toupper((unsigned char) *r);
 	for (r_end = r + Z_STRLEN_P(return_value) - 1; r < r_end; ) {
-		if (isspace((int) *(unsigned char *)r++)) {
+		if (mask[(unsigned char)*r++]) {
 			*r = toupper((unsigned char) *r);
 		}
 	}
@@ -3922,7 +3935,7 @@ static void php_str_replace_in_subject(zval *search, zval *replace, zval **subje
 														   replace_value, replace_len, &Z_STRLEN(temp_result), case_sensitivity, replace_count);
 			}
 
-           str_efree(Z_STRVAL_P(result));
+			str_efree(Z_STRVAL_P(result));
 			Z_STRVAL_P(result) = Z_STRVAL(temp_result);
 			Z_STRLEN_P(result) = Z_STRLEN(temp_result);
 

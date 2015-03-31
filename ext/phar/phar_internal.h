@@ -2,7 +2,7 @@
   +----------------------------------------------------------------------+
   | phar php single-file executable PHP extension                        |
   +----------------------------------------------------------------------+
-  | Copyright (c) 2006-2014 The PHP Group                                |
+  | Copyright (c) 2006-2015 The PHP Group                                |
   +----------------------------------------------------------------------+
   | This source file is subject to version 3.01 of the PHP license,      |
   | that is bundled with this package in the file LICENSE, and is        |
@@ -124,6 +124,8 @@
 #define TAR_SYMLINK '2'
 #define TAR_DIR     '5'
 #define TAR_NEW     '8'
+#define TAR_GLOBAL_HDR 'g'
+#define TAR_FILE_HDR   'x'
 
 #define PHAR_MUNG_PHP_SELF			(1<<0)
 #define PHAR_MUNG_REQUEST_URI		(1<<1)

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | PHP Version 5                                                        |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1997-2014 The PHP Group                                |
+   | Copyright (c) 1997-2015 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -1289,7 +1289,14 @@ PHP_MINFO_FUNCTION(gd)
 
 	/* need to use a PHPAPI function here because it is external module in windows */
 
+#if defined(HAVE_GD_BUNDLED)
 	php_info_print_table_row(2, "GD Version", PHP_GD_VERSION_STRING);
+#else
+	php_info_print_table_row(2, "GD headers Version", PHP_GD_VERSION_STRING);
+#if defined(HAVE_GD_LIBVERSION)
+	php_info_print_table_row(2, "GD library Version", gdVersionString());
+#endif
+#endif
 
 #ifdef ENABLE_GD_TTF
 	php_info_print_table_row(2, "FreeType Support", "enabled");
@@ -5118,10 +5125,22 @@ PHP_FUNCTION(imagescale)
 		return;
 	}
 	method = tmp_m;
-	new_width = tmp_w;
-	new_height = tmp_h;
 
 	ZEND_FETCH_RESOURCE(im, gdImagePtr, &IM, -1, "Image", le_gd);
+
+	if (tmp_h < 0) {
+		/* preserve ratio */
+		long src_x, src_y;
+
+		src_x = gdImageSX(im);
+		src_y = gdImageSY(im);
+		if (src_x) {
+			tmp_h = tmp_w * src_y / src_x;
+		}
+	}
+
+	new_width = tmp_w;
+	new_height = tmp_h;
 
 	if (gdImageSetInterpolationMethod(im, method)) {
 		im_scaled = gdImageScale(im, new_width, new_height);

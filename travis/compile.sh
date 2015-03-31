@@ -21,7 +21,7 @@ $TS \
 --with-pdo-pgsql \
 --with-pdo-sqlite \
 --enable-intl \
---without-pear \
+--with-pear \
 --with-gd \
 --with-jpeg-dir=/usr \
 --with-png-dir=/usr \
@@ -49,5 +49,13 @@ $TS \
 --with-openssl \
 --with-gmp \
 --enable-bcmath \
---enable-phpdbg
-make --quiet
+--enable-phpdbg \
+--enable-calendar \
+--enable-ftp \
+--with-pspell=/usr \
+--with-recode=/usr \
+--with-enchant=/usr \
+--enable-wddx \
+--enable-sysvmsg 
+make -j2 --quiet
+sudo make install

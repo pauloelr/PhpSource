@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | PHP Version 5                                                        |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1997-2014 The PHP Group                                |
+   | Copyright (c) 1997-2015 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -36,6 +36,7 @@
 
 #if defined(PHP_WIN32) && !defined(HAVE_ATOLL)
 # define atoll(s) _atoi64(s)
+# define HAVE_ATOLL 1
 #endif
 
 #define DEBUG_FILE_UPLOAD ZEND_DEBUG
@@ -903,7 +904,11 @@ SAPI_API SAPI_POST_HANDLER_FUNC(rfc1867_post_handler) /* {{{ */
 				}
 
 				if (!strcasecmp(param, "MAX_FILE_SIZE")) {
+#ifdef HAVE_ATOLL
 					max_file_size = atoll(value);
+#else
+					max_file_size = strtoll(value, NULL, 10);
+#endif
 				}
 
 				efree(param);

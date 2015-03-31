@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | PHP Version 5                                                        |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1997-2014 The PHP Group                                |
+   | Copyright (c) 1997-2015 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -68,79 +68,6 @@ PHPDBG_API const char *phpdbg_get_param_type(const phpdbg_param_t *param TSRMLS_
 			return "unknown";
 	}
 }
-
-PHPDBG_API phpdbg_param_type phpdbg_parse_param(const char *str, size_t len, phpdbg_param_t *param TSRMLS_DC) /* {{{ */
-{
-	char *class_name, *func_name;
-
-	if (len == 0) {
-		param->type = EMPTY_PARAM;
-		goto parsed;
-	}
-
-	if (phpdbg_is_addr(str)) {
-		param->addr = strtoul(str, 0, 16);
-		param->type = ADDR_PARAM;
-		goto parsed;
-
-	} else if (phpdbg_is_numeric(str)) {
-		param->num = strtol(str, NULL, 0);
-		param->type = NUMERIC_PARAM;
-		goto parsed;
-
-	} else if (phpdbg_is_class_method(str, len+1, &class_name, &func_name)) {
-		param->method.class = class_name;
-		param->method.name = func_name;
-		param->type = METHOD_PARAM;
-		goto parsed;
-	} else {
-		char *line_pos = strrchr(str, ':');
-
-		if (line_pos && phpdbg_is_numeric(line_pos+1)) {
-			if (strchr(str, ':') == line_pos) {
-				char path[MAXPATHLEN];
-
-				memcpy(path, str, line_pos - str);
-				path[line_pos - str] = 0;
-				*line_pos = 0;
-				param->file.name = phpdbg_resolve_path(path TSRMLS_CC);
-				param->file.line = strtol(line_pos+1, NULL, 0);
-				param->type = FILE_PARAM;
-
-				goto parsed;
-			}
-		}
-
-		line_pos = strrchr(str, '#');
-
-		if (line_pos && phpdbg_is_numeric(line_pos+1)) {
-			if (strchr(str, '#') == line_pos) {
-				param->num = strtol(line_pos + 1, NULL, 0);
-
-				if (phpdbg_is_class_method(str, line_pos - str, &class_name, &func_name)) {
-					param->method.class = class_name;
-					param->method.name = func_name;
-					param->type = NUMERIC_METHOD_PARAM;
-				} else {
-					param->len = line_pos - str;
-					param->str = estrndup(str, param->len);
-					param->type = NUMERIC_FUNCTION_PARAM;
-				}
-
-				goto parsed;
-			}
-		}
-	}
-
-	param->str = estrndup(str, len);
-	param->len = len;
-	param->type = STR_PARAM;
-
-parsed:
-	phpdbg_debug("phpdbg_parse_param(\"%s\", %lu): %s",
-		str, len, phpdbg_get_param_type(param TSRMLS_CC));
-	return param->type;
-} /* }}} */
 
 PHPDBG_API void phpdbg_clear_param(phpdbg_param_t *param TSRMLS_DC) /* {{{ */
 {

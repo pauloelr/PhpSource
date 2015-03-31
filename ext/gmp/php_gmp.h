@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | PHP Version 5                                                        |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1997-2014 The PHP Group                                |
+   | Copyright (c) 1997-2015 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -31,6 +31,8 @@ ZEND_MODULE_DEACTIVATE_D(gmp);
 ZEND_MODULE_INFO_D(gmp);
 
 ZEND_FUNCTION(gmp_init);
+ZEND_FUNCTION(gmp_import);
+ZEND_FUNCTION(gmp_export);
 ZEND_FUNCTION(gmp_intval);
 ZEND_FUNCTION(gmp_strval);
 ZEND_FUNCTION(gmp_add);
@@ -64,6 +66,8 @@ ZEND_FUNCTION(gmp_or);
 ZEND_FUNCTION(gmp_com);
 ZEND_FUNCTION(gmp_xor);
 ZEND_FUNCTION(gmp_random);
+ZEND_FUNCTION(gmp_random_bits);
+ZEND_FUNCTION(gmp_random_range);
 ZEND_FUNCTION(gmp_setbit);
 ZEND_FUNCTION(gmp_clrbit);
 ZEND_FUNCTION(gmp_scan0);

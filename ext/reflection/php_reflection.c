@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | PHP Version 5                                                        |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1997-2014 The PHP Group                                |
+   | Copyright (c) 1997-2015 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -728,12 +728,17 @@ static void _parameter_string(string *str, zend_function *fptr, struct _zend_arg
 		if (precv && precv->opcode == ZEND_RECV_INIT && precv->op2_type != IS_UNUSED) {
 			zval *zv, zv_copy;
 			int use_copy;
+			zend_class_entry *old_scope;
+
 			string_write(str, " = ", sizeof(" = ")-1);
 			ALLOC_ZVAL(zv);
 			*zv = *precv->op2.zv;
 			zval_copy_ctor(zv);
 			INIT_PZVAL(zv);
-			zval_update_constant_ex(&zv, 1, fptr->common.scope TSRMLS_CC);
+			old_scope = EG(scope);
+			EG(scope) = fptr->common.scope;
+			zval_update_constant_ex(&zv, 1, NULL TSRMLS_CC);
+			EG(scope) = old_scope;
 			if (Z_TYPE_P(zv) == IS_BOOL) {
 				if (Z_LVAL_P(zv)) {
 					string_write(str, "true", sizeof("true")-1);
@@ -1010,9 +1015,12 @@ static int _extension_class_string(zend_class_entry **pce TSRMLS_DC, int num_arg
 	int *num_classes = va_arg(args, int*);
 
 	if (((*pce)->type == ZEND_INTERNAL_CLASS) && (*pce)->info.internal.module && !strcasecmp((*pce)->info.internal.module->name, module->name)) {
-		string_printf(str, "\n");
-		_class_string(str, *pce, NULL, indent TSRMLS_CC);
-		(*num_classes)++;
+		/* dump class if it is not an alias */
+		if (!zend_binary_strcasecmp((*pce)->name, (*pce)->name_length, hash_key->arKey, hash_key->nKeyLength-1)) {
+			string_printf(str, "\n");
+			_class_string(str, *pce, NULL, indent TSRMLS_CC);
+			(*num_classes)++;
+		}
 	}
 	return ZEND_HASH_APPLY_KEEP;
 }
@@ -2579,6 +2587,7 @@ ZEND_METHOD(reflection_parameter, getDefaultValue)
 {
 	parameter_reference *param;
 	zend_op *precv;
+	zend_class_entry *old_scope;
 
 	if (zend_parse_parameters_none() == FAILURE) {
 		return;
@@ -2599,7 +2608,10 @@ ZEND_METHOD(reflection_parameter, getDefaultValue)
 	if (!IS_CONSTANT_TYPE(Z_TYPE_P(return_value))) {
 		zval_copy_ctor(return_value);
 	}
-	zval_update_constant_ex(&return_value, 0, param->fptr->common.scope TSRMLS_CC);
+	old_scope = EG(scope);
+	EG(scope) = param->fptr->common.scope;
+	zval_update_constant_ex(&return_value, 0, NULL TSRMLS_CC);
+	EG(scope) = old_scope;
 }
 /* }}} */
 
@@ -4299,8 +4311,8 @@ ZEND_METHOD(reflection_class, newInstanceWithoutConstructor)
 	METHOD_NOTSTATIC(reflection_class_ptr);
 	GET_REFLECTION_OBJECT_PTR(ce);
 
-	if (ce->create_object != NULL) {
-		zend_throw_exception_ex(reflection_exception_ptr, 0 TSRMLS_CC, "Class %s is an internal class that cannot be instantiated without invoking its constructor", ce->name);
+	if (ce->create_object != NULL && ce->ce_flags & ZEND_ACC_FINAL_CLASS) {
+		zend_throw_exception_ex(reflection_exception_ptr, 0 TSRMLS_CC, "Class %s is an internal class marked as final that cannot be instantiated without invoking its constructor", ce->name);
 	}
 
 	object_init_ex(return_value, ce);
@@ -5386,12 +5398,24 @@ static int add_extension_class(zend_class_entry **pce TSRMLS_DC, int num_args, v
 	int add_reflection_class = va_arg(args, int);
 
 	if (((*pce)->type == ZEND_INTERNAL_CLASS) && (*pce)->info.internal.module && !strcasecmp((*pce)->info.internal.module->name, module->name)) {
+		const char *name;
+		int nlen;
+
+		if (zend_binary_strcasecmp((*pce)->name, (*pce)->name_length, hash_key->arKey, hash_key->nKeyLength-1)) {
+			/* This is an class alias, use alias name */
+			name = hash_key->arKey;
+			nlen = hash_key->nKeyLength-1;
+		} else {
+			/* Use class name */
+			name = (*pce)->name;
+			nlen = (*pce)->name_length;
+		}
 		if (add_reflection_class) {
 			ALLOC_ZVAL(zclass);
 			zend_reflection_class_factory(*pce, zclass TSRMLS_CC);
-			add_assoc_zval_ex(class_array, (*pce)->name, (*pce)->name_length + 1, zclass);
+			add_assoc_zval_ex(class_array, name, nlen+1, zclass);
 		} else {
-			add_next_index_stringl(class_array, (*pce)->name, (*pce)->name_length, 1);
+			add_next_index_stringl(class_array, name, nlen, 1);
 		}
 	}
 	return ZEND_HASH_APPLY_KEEP;
@@ -6074,7 +6098,7 @@ ZEND_END_ARG_INFO()
 static const zend_function_entry reflection_zend_extension_functions[] = {
 	ZEND_ME(reflection, __clone, arginfo_reflection__void, ZEND_ACC_PRIVATE|ZEND_ACC_FINAL)
 	ZEND_ME(reflection_zend_extension, export, arginfo_reflection_extension_export, ZEND_ACC_STATIC|ZEND_ACC_PUBLIC)
-	ZEND_ME(reflection_zend_extension, __construct, arginfo_reflection_extension___construct, 0)
+	ZEND_ME(reflection_zend_extension, __construct, arginfo_reflection_zend_extension___construct, 0)
 	ZEND_ME(reflection_zend_extension, __toString, arginfo_reflection__void, 0)
 	ZEND_ME(reflection_zend_extension, getName, arginfo_reflection__void, 0)
 	ZEND_ME(reflection_zend_extension, getVersion, arginfo_reflection__void, 0)
